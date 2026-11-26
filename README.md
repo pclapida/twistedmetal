@@ -30,9 +30,23 @@ ps3recomp as their own pull requests.
 
 **Where it is (BCUS98106 v1.00, D3D12, clang-cl, i7-9700K / RTX 4060):** boots
 through the legal screens and the menus, picks a vehicle and plays a suburbs match
-with the AI at 31-49 fps (menu 12-18 fps). A match still freezes 30-55 s in: the
-main thread waits on Havok's PPU/SPU semaphore and no SPU sends the wake-up. That
-is the one being worked on.
+with the AI, with the whole picture (deferred lighting, sky, the SPU post-FX
+composite). It is slow: 6-10 fps in the menus and about 6 fps in a match. Each
+frame waits for the title's own post-FX pass, about a thousand SPU jobs
+(0.7 CPU-seconds); making that cheaper is what is being worked on.
+
+The settings those numbers are for (environment variables):
+`TM_MAINSTACK=15 TM_JQ_WORKERS=6 TM_JQ_EXTRA=2 GCM_SEMA_ACQUIRE=2
+GCM_SEMA_ACQUIRE_OFFS=420 GCM_SEMA_ACQUIRE_MS=10000 GCM_BLIT_WAIT_MS=0
+GCM_PRESENT_EACH_FLIP=1 PS3_VERBOSE=0`, built against the
+[`feat/live-draw-present-and-packed-zeta`](https://github.com/pclapida/ps3recomp/tree/feat/live-draw-present-and-packed-zeta)
+branch of the ps3recomp fork.
+
+Not in this tree yet: the containment for the Havok job-queue freeze (a match
+could stop 30-55 s in, the main thread waiting on Havok's PPU/SPU semaphore).
+The runs of 10-14 minutes without a freeze were made with it: clamps patched
+into the lifted Havok SPU code, which is generated and not committed, and into
+a local copy of the runtime. Without them a match can still freeze.
 
 **Changes on top of the original and #1:**
 - builds and links against current ps3recomp `master` instead of `ydkj-master-bringup`;
@@ -43,7 +57,14 @@ is the one being worked on.
 - the FIFO walker holds a park while JobQueue jobs are outstanding, so it no
   longer drops unfilled Edge geometry holes (one of the in-match freezes;
   needs [ps3recomp#870](https://github.com/sp00nznet/ps3recomp/pull/870));
-- a `[jq-stall]` diagnostic for JobQueue syncs that wait more than 5 s.
+- a `[jq-stall]` diagnostic for JobQueue syncs that wait more than 5 s;
+- whole frames: the command-buffer flush waits for the FIFO walker (idle, and at
+  the end of a frame) so the title cannot rewrite a segment the walker is still
+  in, and the RSX honours the label the SpuPostFX thread writes before the frame
+  is copied back. A single lost `NV4097_NOTIFY` used to leave that thread
+  composing every frame from another frame's parameters (mixed or black frames);
+- the SPU ELFs that SPURS' own job policy module loads run from their lifted code
+  instead of the interpreter (it was 40% of the CPU the port used).
 
 Related runtime pull requests: [ps3recomp#848](https://github.com/sp00nznet/ps3recomp/pull/848)
 (SPURS task dispatch race), [ps3recomp#870](https://github.com/sp00nznet/ps3recomp/pull/870)
